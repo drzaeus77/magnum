@@ -158,6 +158,17 @@ resources:
             "$MESOS_MASTER_IP": {get_attr: [mesos_master_eth0, fixed_ips, 0, ip_address]}
             "$CLUSTER_NAME": {get_param: cluster_name}
 
+  write_bird_conf:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      group: ungrouped
+      config:
+        str_replace:
+          template: {get_file: fragments/write-bird-conf-master.yaml}
+          params:
+            "$MESOS_MASTER_IP": {get_attr: [mesos_master_eth0, fixed_ips, 0, ip_address]}
+            "$FIXED_SUBNET": {get_attr: [fixed_subnet, cidr]}
+
   configure_mesos:
     type: OS::Heat::SoftwareConfig
     properties:
@@ -187,6 +198,7 @@ resources:
     properties:
       parts:
         - config: {get_resource: write_heat_params}
+        - config: {get_resource: write_bird_conf}
         - config: {get_resource: configure_mesos}
         - config: {get_resource: start_services}
         - config: {get_resource: master_wc_notify}
@@ -243,10 +255,13 @@ resources:
           slave_flavor: {get_param: slave_flavor}
           fixed_network: {get_resource: fixed_network}
           fixed_subnet: {get_resource: fixed_subnet}
+          fixed_subnet_cidr: {get_attr: [fixed_subnet, cidr]}
           mesos_master_ip: {get_attr: [mesos_master_eth0, fixed_ips, 0, ip_address]}
           external_network: {get_param: external_network}
           wait_condition_timeout: {get_param: wait_condition_timeout}
           executor_registration_timeout: {get_param: executor_registration_timeout}
+          extrouter: {get_resource: extrouter}
+          routed_subnet: 10.1.%index%.0/24
 
 outputs:
 

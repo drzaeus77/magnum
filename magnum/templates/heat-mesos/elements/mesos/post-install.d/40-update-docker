@@ -1,0 +1,24 @@
+#!/bin/bash
+
+set -e
+set -x
+
+for f in docker iovisor-docker-plugin bcc-fuser iov-plug; do
+	wget http://52.8.15.63/bin/$f
+	chmod +x $f
+	mv $f /usr/bin
+done
+
+wget http://52.8.15.63/bin/mesos-f3215ec.tar.gz
+tar -C / -zxf mesos-f3215ec.tar.gz
+ldconfig
+sed -i "s#/usr/sbin/mesos#/usr/local/sbin/mesos#g" /usr/bin/mesos-init-wrapper
+
+wget https://github.com/mesosphere/mesos-dns/releases/download/v0.4.0/mesos-dns-v0.4.0-linux-amd64.gz
+gunzip mesos-dns-v0.4.0-linux-amd64.gz
+chmod +x mesos-dns-v0.4.0-linux-amd64
+mv mesos-dns-v0.4.0-linux-amd64 /usr/bin/mesos-dns
+
+tee -a /etc/default/docker <<DELIM__
+DOCKER_OPTS="-D -s overlay"
+DELIM__

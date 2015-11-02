@@ -49,6 +49,16 @@ parameters:
   fixed_subnet:
     type: string
     description: Subnet from which to allocate fixed addresses.
+  # pass this because instance templates can't lookup fields parent resources
+  fixed_subnet_cidr:
+    type: string
+    description: Subnet CIDR for the above fixed subnet.
+  extrouter:
+    type: string
+    description: Router to configure internal static routes on.
+  routed_subnet:
+    type: string
+    description: Routed subnet provided by the instance.
 
 resources:
 
@@ -86,6 +96,20 @@ resources:
           params:
             "$MESOS_MASTER_IP": {get_param: mesos_master_ip}
             "$EXECUTOR_REGISTRATION_TIMEOUT": {get_param: executor_registration_timeout}
+            "$FIXED_SUBNET": {get_param: fixed_subnet_cidr}
+            "$ROUTED_SUBNET": {get_param: routed_subnet}
+
+  write_bird_conf:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      group: ungrouped
+      config:
+        str_replace:
+          template: {get_file: fragments/write-bird-conf-slave.yaml}
+          params:
+            "$MESOS_SLAVE_IP": {get_attr: [mesos_slave_eth0, fixed_ips, 0, ip_address]}
+            "$FIXED_SUBNET": {get_param: fixed_subnet_cidr}
+            "$ROUTED_SUBNET": {get_param: routed_subnet}
 
   configure_mesos_slave:
     type: OS::Heat::SoftwareConfig
@@ -116,6 +140,7 @@ resources:
     properties:
       parts:
         - config: {get_resource: write_heat_params}
+        - config: {get_resource: write_bird_conf}
         - config: {get_resource: configure_mesos_slave}
         - config: {get_resource: start_services}
         - config: {get_resource: slave_wc_notify}
@@ -145,6 +170,15 @@ resources:
       fixed_ips:
         - subnet: {get_param: fixed_subnet}
       replacement_policy: AUTO
+
+  mesos_slave_host_route:
+    type: OS::Neutron::ExtraRoute
+    depends_on:
+      - mesos_slave
+    properties:
+      destination: {get_param: routed_subnet}
+      nexthop: {get_attr: [mesos_slave, first_address]}
+      router_id: {get_param: extrouter}
 
   mesos_slave_floating:
     type: OS::Neutron::FloatingIP

@@ -1,0 +1,87 @@
+#!/bin/bash
+
+mkdir -p /usr/share/bcc/examples
+wget -O /usr/share/bcc/examples/docker-plugin.c https://raw.githubusercontent.com/iovisor/bcc/iomodule-rest/iomodule/iomodule/plugins/gbp/ipvlan-handlers.c
+wget -O /usr/share/bcc/examples/vlan-mux.c https://raw.githubusercontent.com/iovisor/bcc/iomodule-rest/iomodule/iomodule/plugins/gbp/vlan-mux-handlers.c
+
+tee /etc/init/bcc-fuser.conf <<'DELIM__'
+author "Brenden Blanco <bblanco@plumgrid.com>"
+
+start on mounted MOUNTPOINT=/run
+
+pre-start script
+  mkdir -p /run/bcc
+end script
+
+post-start script
+  sleep 3
+  mkdir /run/bcc/foo
+  mkdir /run/bcc/mux
+  cp /usr/share/bcc/examples/docker-plugin.c /run/bcc/foo/source
+  cp /usr/share/bcc/examples/vlan-mux.c /run/bcc/mux/source
+  func1=/run/bcc/foo/functions/ingress
+  func2=/run/bcc/foo/functions/egress
+  func3=/run/bcc/mux/functions/ingress
+  func4=/run/bcc/mux/functions/egress
+  echo -n sched_act > $func1/type
+  echo -n sched_act > $func2/type
+  echo -n sched_act > $func3/type
+  echo -n sched_act > $func4/type
+  for i in `seq 1 20`; do
+    [ -S $func1/fd -a -S $func2/fd -a -S $func3/fd -a -S func4/fd ] && break
+    sleep 0.25
+  done
+  [ ! -S $func1/fd ] && stop
+  [ ! -S $func2/fd ] && stop
+  [ ! -S $func3/fd ] && stop
+  [ ! -S $func4/fd ] && stop
+  tc qdisc del dev eth0 root 2> /dev/null || true
+  tc qdisc del dev eth0 ingress 2> /dev/null || true
+  iov-plug -i eth0 -f /run/bcc/mux/functions/egress/fd -t fq_codel
+  iov-plug -i eth0 -f /run/bcc/mux/functions/ingress/fd -t ingress
+end script
+
+script
+  export HOME=/root
+  exec bcc-fuser -s -f /run/bcc
+end script
+DELIM__
+
+tee /etc/init/iovisor-docker-plugin.conf <<'DELIM__'
+author "Brenden Blanco <bblanco@plumgrid.com>"
+
+start on starting docker
+stop on stopped docker
+
+script
+  args=""
+  if [ -f /etc/sysconfig/heat-params ]; then
+    . /etc/sysconfig/heat-params
+    args="$args --subnet $ROUTED_SUBNET"
+  fi
+  exec iovisor-docker-plugin $args
+end script
+DELIM__
+
+tee /etc/init/iovisor-docker-network.conf <<'DELIM__'
+author "Brenden Blanco <bblanco@plumgrid.com>"
+
+task
+start on (started docker and started iovisor-docker-plugin)
+
+script
+  set -x
+  args=""
+  if [ -f /etc/sysconfig/heat-params ]; then
+    . /etc/sysconfig/heat-params
+    octet4=`echo $ROUTED_SUBNET | sed -r 's#/.*##; s#.*\.##'`
+    octet4=`expr $octet4 + 2`
+    rsv1=`echo $ROUTED_SUBNET | sed -r 's#/.*##; s#(.*)\..*#\1.'$octet4'#'`
+    args="$args --subnet $ROUTED_SUBNET --aux-address rsv1=$rsv1"
+  fi
+  if docker network ls | grep -q iovisor; then
+    docker network rm iovisor
+  fi
+  docker network create -d iovisor $args iovisor
+end script
+DELIM__

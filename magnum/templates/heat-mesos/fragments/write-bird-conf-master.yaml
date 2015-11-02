@@ -1,0 +1,31 @@
+#cloud-config
+merge_how: dict(recurse_array)+list(append)
+write_files:
+  - path: /etc/bird/bird.conf
+    owner: "root:root"
+    permissions: "0644"
+    content: |
+      router id $MESOS_MASTER_IP;
+      protocol kernel {
+              persist;
+              scan time 20;
+              export all;
+      }
+      protocol device {
+              scan time 10;
+      }
+      protocol ospf DockerOSPF {
+              tick 2;
+              rfc1583compat no;
+              area 0.0.0.0 {
+                      stub no;
+                      interface "eth0" {
+                              dead count 4;
+                              cost 20;
+                              type broadcast;
+                      };
+                      networks {
+                              $FIXED_SUBNET;
+                      };
+              };
+      }
